@@ -39,6 +39,23 @@ function Login() {
         <br />
         <button type="submit">Login</button>
       </form>
+      <div style={{ marginTop: "1rem" }}>
+        <a href="http://localhost:5001/auth/google">
+          <button
+            style={{
+              backgroundColor: "#db4437",
+              color: "white",
+              padding: "10px 20px",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Sign in with Google
+          </button>
+        </a>
+      </div>
+
       {error && <p style={{ color: "red" }}>{error}</p>}
     </div>
   );

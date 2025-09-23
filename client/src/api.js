@@ -1,21 +1,12 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
-
 export async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem("token");
-  const headers = {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`http://localhost:5001${path}`, {
     ...options,
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    credentials: "include", // <-- important
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed with ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

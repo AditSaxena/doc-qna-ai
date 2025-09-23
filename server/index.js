@@ -10,6 +10,9 @@ const pdfParse = require("pdf-parse");
 const mammoth = require("mammoth");
 const { MongoClient, ObjectId } = require("mongodb");
 const OpenAI = require("openai");
+const passport = require("passport");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const cookieParser = require("cookie-parser");
 
 const app = express();
 
@@ -31,6 +34,9 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
+
+app.use(cookieParser());
+app.use(passport.initialize());
 
 // --- env ---
 const PORT = process.env.PORT || 5000;
@@ -152,9 +158,9 @@ function generateJwt(user) {
 }
 
 async function verifyTokenMiddleware(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header) return res.status(401).json({ error: "No token" });
-  const token = header.split(" ")[1];
+  const token = req.cookies.token; // <-- from cookie
+  if (!token) return res.status(401).json({ error: "No token" });
+
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await usersColl.findOne({ _id: new ObjectId(payload.id) });
@@ -165,6 +171,52 @@ async function verifyTokenMiddleware(req, res, next) {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
+
+// --- Google OAuth Setup ---
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_CALLBACK_URL =
+  process.env.GOOGLE_CALLBACK_URL ||
+  "http://localhost:5001/auth/google/callback";
+
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: GOOGLE_CLIENT_ID,
+      clientSecret: GOOGLE_CLIENT_SECRET,
+      callbackURL: GOOGLE_CALLBACK_URL,
+    },
+    async function (accessToken, refreshToken, profile, done) {
+      try {
+        const email =
+          (profile.emails && profile.emails[0] && profile.emails[0].value) ||
+          "";
+        const googleId = profile.id;
+        const name = profile.displayName || "";
+
+        let user = await usersColl.findOne({ googleId });
+        if (!user) {
+          user = await usersColl.findOne({ email });
+          if (!user) {
+            const doc = { email, name, googleId, createdAt: new Date() };
+            const r = await usersColl.insertOne(doc);
+            user = await usersColl.findOne({ _id: r.insertedId });
+          } else {
+            await usersColl.updateOne(
+              { _id: user._id },
+              { $set: { googleId } }
+            );
+            user = await usersColl.findOne({ _id: user._id });
+          }
+        }
+        return done(null, user);
+      } catch (err) {
+        console.error("Google auth error", err);
+        return done(err, null);
+      }
+    }
+  )
+);
 
 // ----------------- Auth Routes -----------------
 app.post("/api/auth/register", async (req, res) => {
@@ -185,10 +237,14 @@ app.post("/api/auth/register", async (req, res) => {
     const r = await usersColl.insertOne(user);
     const saved = await usersColl.findOne({ _id: r.insertedId });
     const token = generateJwt(saved);
-    res.json({
-      token,
-      user: { id: saved._id, email: saved.email, name: saved.name },
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: "lax", // or "strict" / "none" (with secure:true) in production
+      secure: false, // set to true if using HTTPS in production
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
+
+    res.json({ user: { id: saved._id, email: saved.email, name: saved.name } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -205,14 +261,30 @@ app.post("/api/auth/login", async (req, res) => {
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(400).json({ error: "Invalid credentials" });
     const token = generateJwt(user);
-    res.json({
-      token,
-      user: { id: user._id, email: user.email, name: user.name },
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: "lax", // or "strict" / "none" (with secure:true) in production
+      secure: false, // set to true if using HTTPS in production
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
+
+    res.json({ user: { id: saved._id, email: saved.email, name: saved.name } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ----------------- Current User Route -----------------
+app.get("/api/auth/me", verifyTokenMiddleware, async (req, res) => {
+  const u = req.user;
+  res.json({ user: { id: u._id, email: u.email, name: u.name } });
+});
+
+// Logout (clears cookie)
+app.post("/api/auth/logout", (req, res) => {
+  res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
+  res.json({ ok: true });
 });
 
 // ----------------- Upload route -----------------
@@ -427,3 +499,35 @@ app.get("/api/history", verifyTokenMiddleware, async (req, res) => {
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+
+// Start Google login
+app.get(
+  "/auth/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+  })
+);
+
+app.get(
+  "/auth/google/callback",
+  passport.authenticate("google", {
+    failureRedirect: "/login",
+    session: false,
+  }),
+  (req, res) => {
+    // 1. Generate JWT
+    const token = generateJwt(req.user);
+
+    // 2. Set HttpOnly cookie
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: "lax", // change to "none" + secure:true if using HTTPS in prod
+      secure: false, // true for production HTTPS
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // 3. Redirect back to frontend
+    res.redirect("http://localhost:5173/");
+  }
+);
