@@ -184,7 +184,8 @@ async function startServer() {
         res.cookie("token", token, {
           httpOnly: true,
           sameSite: "lax",
-          secure: false, // true in production HTTPS
+          // secure: false, // true in production HTTPS
+          secure: true,
           maxAge: 7 * 24 * 60 * 60 * 1000,
         });
         // ✅ Redirect to env FRONTEND_URL
