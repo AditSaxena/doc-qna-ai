@@ -19,9 +19,12 @@ function App() {
         const res = await fetch(`${API_BASE}/api/auth/me`, {
           credentials: "include",
         });
-        if (!res.ok) throw new Error("Not logged in");
-        const data = await res.json();
-        setUser(data.user);
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.user);
+        } else {
+          setUser(null);
+        }
       } catch {
         setUser(null);
       } finally {
@@ -56,7 +59,7 @@ function App() {
             <Route
               path="/"
               element={
-                <ProtectedRoute user={user}>
+                <ProtectedRoute user={user} loading={loading}>
                   <UploadPage />
                 </ProtectedRoute>
               }
