@@ -62,24 +62,31 @@ const s3 = new S3Client({
     secretAccessKey: AWS_SECRET_ACCESS_KEY,
   },
 });
-const mongoClient = new MongoClient(MONGO_URI);
+const mongoClient = new MongoClient(MONGO_URI, {
+  ssl: true, // ensure SSL
+  tlsAllowInvalidCertificates: false,
+  minVersion: "TLSv1.2", // force TLS 1.2
+  serverSelectionTimeoutMS: 20000, // wait longer before failing
+});
+
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 let usersColl, docsColl, chunksColl, historyColl;
 
 async function initDb() {
-  await mongoClient.connect();
-  const db = mongoClient.db(MONGO_DB);
-  usersColl = db.collection("users");
-  docsColl = db.collection("documents");
-  chunksColl = db.collection("chunks");
-  historyColl = db.collection("history");
-  console.log("Connected to MongoDB");
+  try {
+    await mongoClient.connect();
+    const db = mongoClient.db(MONGO_DB);
+    usersColl = db.collection("users");
+    docsColl = db.collection("documents");
+    chunksColl = db.collection("chunks");
+    historyColl = db.collection("history");
+    console.log("✅ Connected to MongoDB");
+  } catch (err) {
+    console.error("❌ DB init failed:", err);
+    process.exit(1);
+  }
 }
-initDb().catch((err) => {
-  console.error("DB init failed:", err);
-  process.exit(1);
-});
 
 // --- Helpers ---
 function generateJwt(user) {
