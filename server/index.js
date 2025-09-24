@@ -20,10 +20,6 @@ const app = express();
 
 // --- Middleware ---
 app.use(
-  // cors({
-  //   origin: "http://localhost:5173",
-  //   credentials: true,
-  // })
   cors({
     origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
     credentials: true,
@@ -67,30 +63,13 @@ const s3 = new S3Client({
   },
 });
 const mongoClient = new MongoClient(MONGO_URI, {
-  // ssl: true, // ensure SSL
-  // tlsAllowInvalidCertificates: false,
-  // minVersion: "TLSv1.2", // force TLS 1.2
   serverSelectionTimeoutMS: 20000, // wait longer before failing
 });
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// --- Globals ---
 let usersColl, docsColl, chunksColl, historyColl;
-
-async function initDb() {
-  try {
-    await mongoClient.connect();
-    const db = mongoClient.db(MONGO_DB);
-    usersColl = db.collection("users");
-    docsColl = db.collection("documents");
-    chunksColl = db.collection("chunks");
-    historyColl = db.collection("history");
-    console.log("✅ Connected to MongoDB");
-  } catch (err) {
-    console.error("❌ DB init failed:", err);
-    process.exit(1);
-  }
-}
 
 // --- Helpers ---
 function generateJwt(user) {
@@ -141,206 +120,95 @@ async function extractTextFromBuffer(buffer, mimetype, originalname) {
   return buffer.toString("utf-8");
 }
 
-// --- Google OAuth ---
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL:
-        process.env.GOOGLE_CALLBACK_URL ||
-        "http://localhost:5001/api/auth/google/callback",
-    },
-    async (accessToken, refreshToken, profile, done) => {
-      let user = await usersColl.findOne({ googleId: profile.id });
-      if (!user) {
-        const newUser = {
-          googleId: profile.id,
-          name: profile.displayName,
-          email: profile.emails?.[0]?.value || "",
-          createdAt: new Date(),
-        };
-        const res = await usersColl.insertOne(newUser);
-        user = await usersColl.findOne({ _id: res.insertedId });
-      }
-      return done(null, user);
-    }
-  )
-);
-
-passport.serializeUser((user, done) => done(null, user._id));
-passport.deserializeUser(async (id, done) => {
-  const user = await usersColl.findOne({ _id: new ObjectId(id) });
-  done(null, user);
-});
-
-// --- Auth Routes ---
-app.get(
-  "/api/auth/google",
-  passport.authenticate("google", {
-    scope: ["profile", "email"],
-    session: false,
-  })
-);
-
-app.get(
-  "/api/auth/google/callback",
-  passport.authenticate("google", {
-    failureRedirect: "/login",
-    session: false,
-  }),
-  (req, res) => {
-    const token = generateJwt(req.user);
-    res.cookie("token", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: false, // set true in production
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    res.redirect(process.env.FRONTEND_URL || "http://localhost:5173/");
-  }
-);
-
-app.get("/api/auth/me", verifyTokenMiddleware, async (req, res) => {
-  res.json({
-    user: { id: req.user._id, email: req.user.email, name: req.user.name },
-  });
-});
-
-app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
-  res.json({ ok: true });
-});
-
-// --- Upload ---
-app.post(
-  "/api/upload",
-  verifyTokenMiddleware,
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      const { buffer, originalname, mimetype } = req.file;
-      const { Key, publicUrl } = await uploadToS3(
-        buffer,
-        originalname,
-        mimetype
-      );
-
-      const fullText = await extractTextFromBuffer(
-        buffer,
-        mimetype,
-        originalname
-      );
-      const chunks = fullText.match(/.{1,1000}/g) || [];
-
-      const docRes = await docsColl.insertOne({
-        userId: req.user._id,
-        filename: originalname,
-        s3Key: Key,
-        s3Url: publicUrl,
-        uploadedAt: new Date(),
-        textLength: fullText.length,
-        chunkCount: chunks.length,
-      });
-      const docId = docRes.insertedId;
-
-      if (chunks.length > 0) {
-        const embResp = await openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: chunks,
-        });
-        const bulk = embResp.data.map((d, i) => ({
-          docId,
-          chunkIndex: i,
-          text: chunks[i],
-          embedding: d.embedding,
-          createdAt: new Date(),
-        }));
-        await chunksColl.insertMany(bulk);
-      }
-
-      res.json({
-        ok: true,
-        docId: docId.toString(),
-        s3Url: publicUrl,
-        chunkCount: chunks.length,
-      });
-    } catch (err) {
-      console.error("Upload error", err);
-      res.status(500).json({ error: err.message });
-    }
-  }
-);
-
-// --- Ask ---
-app.post("/api/ask", verifyTokenMiddleware, async (req, res) => {
+// --- Start function (DB first, then Passport, then Server) ---
+async function startServer() {
   try {
-    const { docId, question, topK = 5 } = req.body;
-    const qEmbResp = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: question,
-    });
-    const qEmbedding = qEmbResp.data[0].embedding;
+    // ✅ Connect DB first
+    await mongoClient.connect();
+    const db = mongoClient.db(MONGO_DB);
+    usersColl = db.collection("users");
+    docsColl = db.collection("documents");
+    chunksColl = db.collection("chunks");
+    historyColl = db.collection("history");
+    console.log("✅ Connected to MongoDB");
 
-    const chunks = await chunksColl
-      .find({ docId: new ObjectId(docId) })
-      .toArray();
-    const scored = chunks.map((c) => ({
-      ...c,
-      score: c.embedding.reduce((acc, v, i) => acc + v * qEmbedding[i], 0),
-    }));
-    scored.sort((a, b) => b.score - a.score);
-    const topChunks = scored.slice(0, topK);
-
-    const context = topChunks.map((c) => c.text).join("\n\n");
-
-    const completion = await openai.chat.completions.create({
-      model: OPENAI_CHAT_MODEL,
-      messages: [
-        { role: "system", content: "Answer using the provided context." },
+    // ✅ Google OAuth setup AFTER DB is ready
+    passport.use(
+      new GoogleStrategy(
         {
-          role: "user",
-          content: `Context:\n${context}\n\nQuestion: ${question}`,
+          clientID: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          callbackURL:
+            process.env.GOOGLE_CALLBACK_URL ||
+            "http://localhost:5001/api/auth/google/callback",
         },
-      ],
-      max_tokens: 500,
+        async (accessToken, refreshToken, profile, done) => {
+          let user = await usersColl.findOne({ googleId: profile.id });
+          if (!user) {
+            const res = await usersColl.insertOne({
+              googleId: profile.id,
+              name: profile.displayName,
+              email: profile.emails?.[0]?.value || "",
+              createdAt: new Date(),
+            });
+            user = await usersColl.findOne({ _id: res.insertedId });
+          }
+          return done(null, user);
+        }
+      )
+    );
+
+    passport.serializeUser((user, done) => done(null, user._id));
+    passport.deserializeUser(async (id, done) => {
+      const user = await usersColl.findOne({ _id: new ObjectId(id) });
+      done(null, user);
     });
 
-    const answer = completion.choices[0].message.content;
-    await historyColl.insertOne({
-      userId: req.user._id,
-      docId: new ObjectId(docId),
-      question,
-      answer,
-      createdAt: new Date(),
+    // --- Auth Routes ---
+    app.get(
+      "/api/auth/google",
+      passport.authenticate("google", {
+        scope: ["profile", "email"],
+        session: false,
+      })
+    );
+
+    app.get(
+      "/api/auth/google/callback",
+      passport.authenticate("google", {
+        failureRedirect: "/login",
+        session: false,
+      }),
+      (req, res) => {
+        const token = generateJwt(req.user);
+        res.cookie("token", token, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: false, // true in production HTTPS
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        // ✅ Redirect to env FRONTEND_URL
+        res.redirect(process.env.FRONTEND_URL || "http://localhost:5173/");
+      }
+    );
+
+    app.get("/api/auth/me", verifyTokenMiddleware, async (req, res) => {
+      res.json({
+        user: { id: req.user._id, email: req.user.email, name: req.user.name },
+      });
     });
-    res.json({ answer, sources: topChunks });
+
+    app.post("/api/auth/logout", (req, res) => {
+      res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
+      res.json({ ok: true });
+    });
+
+    // ✅ Start server only after everything is ready
+    app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Startup failed:", err);
+    process.exit(1);
   }
-});
+}
 
-// --- MyDocs & History ---
-app.get("/api/my-docs", verifyTokenMiddleware, async (req, res) => {
-  const docs = await docsColl
-    .find({ userId: req.user._id })
-    .sort({ uploadedAt: -1 })
-    .toArray();
-  res.json({ docs });
-});
-
-// Get chat history for a specific document
-app.get("/api/history/:docId", verifyTokenMiddleware, async (req, res) => {
-  try {
-    const { docId } = req.params;
-    const h = await historyColl
-      .find({ userId: req.user._id, docId: new ObjectId(docId) })
-      .sort({ createdAt: -1 }) // newest first
-      .toArray();
-    res.json({ history: h });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+startServer();
