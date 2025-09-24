@@ -176,14 +176,16 @@ async function startServer() {
     app.get(
       "/api/auth/google/callback",
       passport.authenticate("google", {
-        failureRedirect: "/login",
+        // failureRedirect: "/login",
+        failureRedirect: `${process.env.FRONTEND_URL}/login`,
         session: false,
       }),
       (req, res) => {
         const token = generateJwt(req.user);
         res.cookie("token", token, {
           httpOnly: true,
-          sameSite: "lax",
+          // sameSite: "lax",
+          sameSite: "none",
           // secure: false, // true in production HTTPS
           secure: true,
           maxAge: 7 * 24 * 60 * 60 * 1000,
