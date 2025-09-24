@@ -20,8 +20,12 @@ const app = express();
 
 // --- Middleware ---
 app.use(
+  // cors({
+  //   origin: "http://localhost:5173",
+  //   credentials: true,
+  // })
   cors({
-    origin: "http://localhost:5173",
+    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
     credentials: true,
   })
 );
@@ -63,9 +67,9 @@ const s3 = new S3Client({
   },
 });
 const mongoClient = new MongoClient(MONGO_URI, {
-  ssl: true, // ensure SSL
-  tlsAllowInvalidCertificates: false,
-  minVersion: "TLSv1.2", // force TLS 1.2
+  // ssl: true, // ensure SSL
+  // tlsAllowInvalidCertificates: false,
+  // minVersion: "TLSv1.2", // force TLS 1.2
   serverSelectionTimeoutMS: 20000, // wait longer before failing
 });
 
