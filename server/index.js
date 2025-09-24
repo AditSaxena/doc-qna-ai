@@ -27,15 +27,15 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-app.use(
-  session({
-    secret: process.env.JWT_SECRET || "secret",
-    resave: false,
-    saveUninitialized: false,
-  })
-);
+// app.use(
+//   session({
+//     secret: process.env.JWT_SECRET || "secret",
+//     resave: false,
+//     saveUninitialized: false,
+//   })
+// );
 app.use(passport.initialize());
-app.use(passport.session());
+// app.use(passport.session());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -202,7 +202,11 @@ async function startServer() {
     });
 
     app.post("/api/auth/logout", (req, res) => {
-      res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
+      res.clearCookie("token", {
+        httpOnly: true,
+        sameSite: "none",
+        secure: true,
+      });
       res.json({ ok: true });
     });
 
