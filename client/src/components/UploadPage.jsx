@@ -6,9 +6,10 @@ export default function UploadPage() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
   async function fetchDocs() {
-    const res = await fetch("http://localhost:5001/api/my-docs", {
+    const res = await fetch(`${API_BASE}/api/my-docs`, {
       credentials: "include",
     });
     const data = await res.json();
@@ -27,7 +28,7 @@ export default function UploadPage() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:5001/api/upload", {
+    const res = await fetch(`${API_BASE}/api/upload`, {
       method: "POST",
       body: formData,
       credentials: "include",

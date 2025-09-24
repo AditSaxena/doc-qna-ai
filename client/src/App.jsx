@@ -11,12 +11,12 @@ import Login from "./components/Login";
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-
+  const API_BASE = import.meta.env.VITE_API_BASE_URL;
   // fetch logged in user
   useEffect(() => {
     async function fetchUser() {
       try {
-        const res = await fetch("http://localhost:5001/api/auth/me", {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
           credentials: "include",
         });
         if (!res.ok) throw new Error("Not logged in");
@@ -25,14 +25,14 @@ function App() {
       } catch {
         setUser(null);
       } finally {
-        setLoading(false); // ✅ stop loading after check
+        setLoading(false); // stop loading after check
       }
     }
     fetchUser();
   }, []);
 
   async function handleLogout() {
-    await fetch("http://localhost:5001/api/auth/logout", {
+    await fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",
       credentials: "include",
     });

@@ -7,9 +7,13 @@ export default function ChatPage() {
   const [history, setHistory] = useState([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
   async function fetchHistory() {
-    const res = await fetch(`http://localhost:5001/api/history/${docId}`, {
+    // const res = await fetch(`http://localhost:5001/api/history/${docId}`, {
+    //   credentials: "include",
+    // });
+    const res = await fetch(`${API_BASE}/api/history/${docId}`, {
       credentials: "include",
     });
     const data = await res.json();
@@ -25,11 +29,11 @@ export default function ChatPage() {
     if (!question.trim()) return;
     setLoading(true);
 
-    const res = await fetch("http://localhost:5001/api/ask", {
+    const res = await fetch(`${API_BASE}/api/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ docId, question }),
+      credentials: "include",
     });
 
     setLoading(false);

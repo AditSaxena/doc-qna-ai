@@ -74,7 +74,7 @@ async function initDb() {
   docsColl = db.collection("documents");
   chunksColl = db.collection("chunks");
   historyColl = db.collection("history");
-  console.log("✅ Connected to MongoDB");
+  console.log("Connected to MongoDB");
 }
 initDb().catch((err) => {
   console.error("DB init failed:", err);
@@ -332,4 +332,4 @@ app.get("/api/history/:docId", verifyTokenMiddleware, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));

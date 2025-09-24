@@ -4,7 +4,9 @@ import CardLayout from "./CardLayout";
 export default function Login() {
   const handleGoogleLogin = () => {
     // Redirect to your backend Google login route
-    window.location.href = "http://localhost:5001/api/auth/google";
+    // window.location.href = "http://localhost:5001/api/auth/google";
+    const API_BASE = import.meta.env.VITE_API_BASE_URL;
+    window.location.href = `${API_BASE}/api/auth/google`;
   };
 
   return (
