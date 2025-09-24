@@ -1,62 +1,87 @@
-import React from "react";
-import { Routes, Route, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { apiFetch } from "./api";
-import Login from "./components/Login";
-import Register from "./components/Register";
-import UploadPage from "./components/UploadPage";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+import ProtectedRoute from "./components/ProtectedRoute";
+import NavBar from "./components/NavBar";
+
+import UploadPage from "./components/UploadPage"; // now My Page
 import ChatPage from "./components/ChatPage";
-import HistoryPage from "./components/HistoryPage";
-import MyDocs from "./components/MyDocs";
+import Login from "./components/Login";
 
 function App() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // fetch logged in user
   useEffect(() => {
     async function fetchUser() {
       try {
-        const res = await apiFetch("/api/auth/me");
-        setUser(res.user);
+        const res = await fetch("http://localhost:5001/api/auth/me", {
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("Not logged in");
+        const data = await res.json();
+        setUser(data.user);
       } catch {
         setUser(null);
+      } finally {
+        setLoading(false); // ✅ stop loading after check
       }
     }
     fetchUser();
   }, []);
 
   async function handleLogout() {
-    await apiFetch("/api/auth/logout", { method: "POST" });
+    await fetch("http://localhost:5001/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
     setUser(null);
+  }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-lg text-gray-600">Loading...</p>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <nav style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
-        <Link to="/">Upload</Link> | <Link to="/chat">Chat</Link> |{" "}
-        <Link to="/history">History</Link> | <Link to="/my-docs">My Docs</Link>{" "}
-        | <Link to="/login">Login</Link> | <Link to="/register">Register</Link>
-      </nav>
-      <div>
-        <h1>Document QnA AI</h1>
-        {user ? (
-          <div>
-            <p>Welcome, {user.name || user.email} 🎉</p>
-            <button onClick={handleLogout}>Logout</button>
-          </div>
-        ) : (
-          <p>You are not logged in</p>
-        )}
+    <div className="font-sans bg-gray-100 min-h-screen">
+      <NavBar user={user} onLogout={handleLogout} />
 
-        {/* existing routes/components */}
+      <div className="max-w-4xl mx-auto p-6">
+        {user !== null ? (
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute user={user}>
+                  <UploadPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chat/:docId"
+              element={
+                <ProtectedRoute user={user}>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            {/* <Route path="/login" element={<Login />} /> */}
+            <Route
+              path="/login"
+              element={user ? <Navigate to="/" replace /> : <Login />}
+            />
+          </Routes>
+        ) : (
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        )}
       </div>
-      <Routes>
-        <Route path="/" element={<UploadPage />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/history" element={<HistoryPage />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/my-docs" element={<MyDocs />} />
-      </Routes>
     </div>
   );
 }

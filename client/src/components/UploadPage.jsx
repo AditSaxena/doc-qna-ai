@@ -1,73 +1,96 @@
-import React, { useState } from "react";
-import { apiFetch } from "../api";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  async function fetchDocs() {
+    const res = await fetch("http://localhost:5001/api/my-docs", {
+      credentials: "include",
+    });
+    const data = await res.json();
+    setDocs(data.docs || []);
+  }
+
+  useEffect(() => {
+    fetchDocs();
+  }, []);
 
   async function handleUpload(e) {
     e.preventDefault();
-    setStatus("");
-    setError("");
+    if (!file) return;
+    setLoading(true);
 
-    if (!file) {
-      setError("Please select a file first.");
-      return;
-    }
+    const formData = new FormData();
+    formData.append("file", file);
 
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        setError("You must be logged in to upload.");
-        return;
-      }
+    const res = await fetch("http://localhost:5001/api/upload", {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
 
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:5001"}/api/upload`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`, // no Content-Type, FormData sets it
-          },
-          body: formData,
-        }
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Upload failed: ${res.status}`);
-      }
-
-      const data = await res.json();
-      setStatus(
-        `✅ Upload successful! docId: ${data.docId}, chunks: ${data.chunkCount}`
-      );
-    } catch (err) {
-      console.error("Upload error:", err);
-      setError(err.message || "Upload failed.");
+    setLoading(false);
+    if (res.ok) {
+      setFile(null);
+      fetchDocs(); // refresh docs list
+    } else {
+      alert("Upload failed");
     }
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Upload a Document</h2>
-      <form onSubmit={handleUpload}>
+    <div className="p-6 max-w-2xl mx-auto">
+      {/* Upload form */}
+      <form
+        onSubmit={handleUpload}
+        className="bg-white p-6 rounded shadow mb-6"
+      >
+        <h2 className="text-xl font-bold mb-4">Upload a Document</h2>
         <input
           type="file"
-          accept=".pdf,.docx,.txt"
           onChange={(e) => setFile(e.target.files[0])}
+          className="mb-4"
         />
-        <button type="submit" style={{ marginLeft: 10 }}>
-          Upload
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+        >
+          {loading ? "Uploading..." : "Upload"}
         </button>
       </form>
 
-      {status && <p style={{ color: "green", marginTop: 10 }}>{status}</p>}
-      {error && <p style={{ color: "crimson", marginTop: 10 }}>{error}</p>}
+      {/* Documents list */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold mb-2">My Documents</h2>
+        {docs.length === 0 ? (
+          <p className="text-gray-600">No documents uploaded yet.</p>
+        ) : (
+          docs.map((doc) => (
+            <div
+              key={doc._id}
+              className="bg-white p-4 rounded shadow flex justify-between items-center"
+            >
+              <div>
+                <p className="font-medium">{doc.filename}</p>
+                <p className="text-sm text-gray-500">
+                  Uploaded: {new Date(doc.uploadedAt).toLocaleString()}
+                </p>
+              </div>
+              <button
+                onClick={() => navigate(`/chat/${doc._id}`)}
+                className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded"
+              >
+                Open Chat →
+              </button>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

@@ -1,111 +1,90 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 
 export default function ChatPage() {
-  const [docId, setDocId] = useState("");
+  const { docId } = useParams();
+  const navigate = useNavigate();
+  const [history, setHistory] = useState([]);
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  async function fetchHistory() {
+    const res = await fetch(`http://localhost:5001/api/history/${docId}`, {
+      credentials: "include",
+    });
+    const data = await res.json();
+    setHistory(data.history || []);
+  }
+
+  useEffect(() => {
+    fetchHistory();
+  }, [docId]);
 
   async function handleAsk(e) {
     e.preventDefault();
-    setError("");
-    setAnswer("");
-    setSources([]);
-    if (!docId || !question) {
-      setError("Please enter both docId and a question.");
-      return;
-    }
-
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setError("You must be logged in.");
-      return;
-    }
-
+    if (!question.trim()) return;
     setLoading(true);
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:5001"}/api/ask`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ docId, question }),
-        }
-      );
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Ask failed: ${res.status}`);
-      }
+    const res = await fetch("http://localhost:5001/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ docId, question }),
+    });
 
-      const data = await res.json();
-      setAnswer(data.answer || "No answer found.");
-      setSources(data.sources || []);
-    } catch (err) {
-      console.error("Ask error:", err);
-      setError(err.message || "Failed to get answer.");
-    } finally {
-      setLoading(false);
+    setLoading(false);
+    if (res.ok) {
+      setQuestion("");
+      fetchHistory();
+    } else {
+      alert("Failed to ask question");
     }
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Chat with Document</h2>
-      <form onSubmit={handleAsk}>
-        <div style={{ marginBottom: 8 }}>
-          <input
-            style={{ width: "60%" }}
-            placeholder="Enter docId (from upload success)"
-            value={docId}
-            onChange={(e) => setDocId(e.target.value)}
-          />
-        </div>
+    <div className="p-6 max-w-2xl mx-auto">
+      {/* Back button */}
+      <button
+        onClick={() => navigate("/")}
+        className="mb-4 text-blue-600 hover:underline"
+      >
+        ← Back to My Page
+      </button>
 
-        <div>
-          <textarea
-            rows={4}
-            cols={60}
-            placeholder="Ask your question..."
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        </div>
+      {/* Chat history */}
+      <div className="bg-white p-4 rounded shadow mb-4 max-h-[400px] overflow-y-auto">
+        {history.length === 0 ? (
+          <p className="text-gray-500">No questions asked yet.</p>
+        ) : (
+          history.map((h, idx) => (
+            <div key={idx} className="mb-4 text-left">
+              <p className="font-semibold">Q: {h.question}</p>
+              <p className="text-gray-700">A: {h.answer}</p>
+              <hr className="my-2" />
+            </div>
+          ))
+        )}
+      </div>
 
-        <div style={{ marginTop: 8 }}>
-          <button type="submit" disabled={loading}>
-            {loading ? "Thinking..." : "Ask"}
-          </button>
-        </div>
+      {/* Ask input */}
+      <form
+        onSubmit={handleAsk}
+        className="flex space-x-2 bg-white p-4 rounded shadow"
+      >
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask a question about this document..."
+          className="flex-1 border px-3 py-2 rounded"
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+        >
+          {loading ? "Asking..." : "Ask"}
+        </button>
       </form>
-
-      {error && <p style={{ color: "crimson", marginTop: 10 }}>{error}</p>}
-
-      {answer && (
-        <div style={{ marginTop: 16, padding: 12, border: "1px solid #ddd" }}>
-          <strong>Answer:</strong>
-          <p>{answer}</p>
-        </div>
-      )}
-
-      {sources.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <strong>Sources:</strong>
-          <ul>
-            {sources.map((s, i) => (
-              <li key={i}>
-                Chunk {s.chunkIndex} (score: {(s.score || 0).toFixed(3)}) —{" "}
-                <em>{s.text.slice(0, 80)}...</em>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
