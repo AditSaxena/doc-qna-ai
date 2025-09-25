@@ -9,6 +9,7 @@ export default function UploadPage() {
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
   async function fetchDocs() {
+    console.log(API_BASE);
     const res = await fetch(`${API_BASE}/api/my-docs`, {
       credentials: "include",
     });
