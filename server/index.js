@@ -273,6 +273,76 @@ async function startServer() {
       }
     );
 
+    // --- Ask ---
+    app.post("/api/ask", verifyTokenMiddleware, async (req, res) => {
+      try {
+        const { docId, question, topK = 5 } = req.body;
+        const qEmbResp = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: question,
+        });
+        const qEmbedding = qEmbResp.data[0].embedding;
+
+        const chunks = await chunksColl
+          .find({ docId: new ObjectId(docId) })
+          .toArray();
+        const scored = chunks.map((c) => ({
+          ...c,
+          score: c.embedding.reduce((acc, v, i) => acc + v * qEmbedding[i], 0),
+        }));
+        scored.sort((a, b) => b.score - a.score);
+        const topChunks = scored.slice(0, topK);
+
+        const context = topChunks.map((c) => c.text).join("\n\n");
+
+        const completion = await openai.chat.completions.create({
+          model: OPENAI_CHAT_MODEL,
+          messages: [
+            { role: "system", content: "Answer using the provided context." },
+            {
+              role: "user",
+              content: `Context:\n${context}\n\nQuestion: ${question}`,
+            },
+          ],
+          max_tokens: 500,
+        });
+
+        const answer = completion.choices[0].message.content;
+        await historyColl.insertOne({
+          userId: req.user._id,
+          docId: new ObjectId(docId),
+          question,
+          answer,
+          createdAt: new Date(),
+        });
+        res.json({ answer, sources: topChunks });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // --- MyDocs & History ---
+    app.get("/api/my-docs", verifyTokenMiddleware, async (req, res) => {
+      const docs = await docsColl
+        .find({ userId: req.user._id })
+        .sort({ uploadedAt: -1 })
+        .toArray();
+      res.json({ docs });
+    });
+
+    app.get("/api/history/:docId", verifyTokenMiddleware, async (req, res) => {
+      try {
+        const { docId } = req.params;
+        const h = await historyColl
+          .find({ userId: req.user._id, docId: new ObjectId(docId) })
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.json({ history: h });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- Health check ---
     app.get("/api/health", (req, res) => {
       res.json({ ok: true, status: "Backend running ✅" });
