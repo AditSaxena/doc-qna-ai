@@ -210,6 +210,11 @@ async function startServer() {
       res.json({ ok: true });
     });
 
+    // --- Health check ---
+    app.get("/api/health", (req, res) => {
+      res.json({ ok: true, status: "Backend running ✅" });
+    });
+
     // ✅ Start server only after everything is ready
     app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
   } catch (err) {
