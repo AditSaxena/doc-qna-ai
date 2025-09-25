@@ -21,7 +21,7 @@ const app = express();
 // --- Middleware ---
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
     credentials: true,
   })
 );
@@ -213,6 +213,11 @@ async function startServer() {
     // --- Health check ---
     app.get("/api/health", (req, res) => {
       res.json({ ok: true, status: "Backend running ✅" });
+    });
+
+    app.use((err, req, res, next) => {
+      console.error("Unhandled error:", err);
+      res.status(500).json({ error: "Internal server error" });
     });
 
     // ✅ Start server only after everything is ready
