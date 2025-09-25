@@ -210,6 +210,69 @@ async function startServer() {
       res.json({ ok: true });
     });
 
+    // --- Upload ---
+    app.post(
+      "/api/upload",
+      verifyTokenMiddleware,
+      upload.single("file"),
+      async (req, res) => {
+        try {
+          if (!req.file)
+            return res.status(400).json({ error: "No file uploaded" });
+
+          const { buffer, originalname, mimetype } = req.file;
+          const { Key, publicUrl } = await uploadToS3(
+            buffer,
+            originalname,
+            mimetype
+          );
+
+          const fullText = await extractTextFromBuffer(
+            buffer,
+            mimetype,
+            originalname
+          );
+          const chunks = fullText.match(/.{1,1000}/g) || [];
+
+          const docRes = await docsColl.insertOne({
+            userId: req.user._id,
+            filename: originalname,
+            s3Key: Key,
+            s3Url: publicUrl,
+            uploadedAt: new Date(),
+            textLength: fullText.length,
+            chunkCount: chunks.length,
+          });
+          const docId = docRes.insertedId;
+
+          if (chunks.length > 0) {
+            const embResp = await openai.embeddings.create({
+              model: "text-embedding-3-small",
+              input: chunks,
+            });
+            const bulk = embResp.data.map((d, i) => ({
+              docId,
+              chunkIndex: i,
+              text: chunks[i],
+              embedding: d.embedding,
+              createdAt: new Date(),
+            }));
+            await chunksColl.insertMany(bulk);
+          }
+
+          res.json({
+            ok: true,
+            docId: docId.toString(),
+            s3Url: publicUrl,
+            chunkCount: chunks.length,
+          });
+        } catch (err) {
+          console.error("Upload error:", err);
+          res.status(500).json({ error: err.message });
+        }
+      }
+    );
+
     // --- Health check ---
     app.get("/api/health", (req, res) => {
       res.json({ ok: true, status: "Backend running ✅" });
